@@ -1,22 +1,53 @@
-let clientId = null;
-const API_URL = "REPLACE_WITH_API_URL/analyze";
-// Add event listener to the uploadForm
+// Cognito configuration
+const poolData = {
+    UserPoolId: 'REPLACE_WITH_USER_POOL_ID',
+    ClientId: 'REPLACE_WITH_CLIENT_ID'
+};
+const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
 
-// Remove the clientForm event listener since that form no longer exists
-// and we're now handling the client ID in the uploadForm
+// Check authentication on page load
+window.onload = function() {
+    const cognitoUser = userPool.getCurrentUser();
+    if (!cognitoUser) {
+        window.location.href = 'login.html';
+        return;
+    }
+    cognitoUser.getSession(function(err, session) {
+        if (err || !session.isValid()) {
+            window.location.href = 'login.html';
+            return;
+        }
+        // User is authenticated, continue loading the app
+        initializeApp(session.getIdToken().getJwtToken());
+    });
+};
 
-document.addEventListener('DOMContentLoaded', function() {
-  // Make sure all elements are loaded before accessing them
+function initializeApp(idToken) {
   const uploadForm = document.getElementById('uploadForm');
   const clientIdInput = document.getElementById('clientId');
   const imageFilesInput = document.getElementById('imageFiles');
   const resultsDiv = document.getElementById('results');
-  
+
+  // Add logout button if not present
+  if (!document.getElementById('logoutButton')) {
+    const logoutBtn = document.createElement('button');
+    logoutBtn.id = 'logoutButton';
+    logoutBtn.textContent = 'Logout';
+    logoutBtn.style = 'position:fixed;top:20px;left:20px;z-index:1000;';
+    logoutBtn.onclick = function() {
+      const cognitoUser = userPool.getCurrentUser();
+      if (cognitoUser) cognitoUser.signOut();
+      localStorage.removeItem('idToken');
+      window.location.href = 'login.html';
+    };
+    document.body.appendChild(logoutBtn);
+  }
+
   if (!uploadForm || !clientIdInput || !imageFilesInput || !resultsDiv) {
     console.error('One or more required elements not found in the DOM');
     return;
   }
-  
+
   uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const clientId = clientIdInput.value.trim();
@@ -24,66 +55,37 @@ document.addEventListener('DOMContentLoaded', function() {
       alert('נא להזין מזהה לקוח');
       return;
     }
-
     const files = imageFilesInput.files;
     if (files.length === 0) {
       alert('נא לבחור לפחות תמונה אחת');
       return;
     }
-    
     resultsDiv.innerHTML = '';
-
     for (const file of files) {
       const formData = new FormData();
       formData.append('clientId', clientId);
       formData.append('image', file);
-
       try {
-        // Show loading indicator
         const loadingBox = document.createElement('div');
         loadingBox.className = 'result-box';
         loadingBox.innerHTML = `<h3>${file.name}</h3><p>מעבד תמונה...</p>`;
         resultsDiv.appendChild(loadingBox);
-        
-        const res = await fetch(API_URL, {
+        const res = await fetch('REPLACE_WITH_API_URL/analyze', {
           method: 'POST',
-          body: formData
+          body: formData,
+          headers: {
+            'Authorization': idToken
+          }
         });
-        
-        console.log('Response status:', res.status);
-        
-        // Check for non-200 status codes
-        if (!res.ok) {
-          console.error(`HTTP error! Status: ${res.status}`);
-          throw new Error(`HTTP error! Status: ${res.status}`);
-        }
-        
+        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
         const responseText = await res.text();
-        console.log('Raw response:', responseText);
-        
-        // Try to parse as JSON only if it's valid
         let data;
         try {
           data = JSON.parse(responseText);
-          console.log('Parsed data:', data);
         } catch (parseError) {
-          console.error('JSON parse error:', parseError);
           throw new Error('Invalid response format');
         }
-        
-        // Check if data.labels exists before using it
-        if (!data || !data.labels) {
-          console.error('No labels in response:', data);
-          throw new Error('No labels data received');
-        }
-        
-        // Log labels to console
-        console.log('Labels for', file.name, ':', data.labels);
-        data.labels.forEach(label => {
-          console.log(`- ${label.name}: ${label.confidence.toFixed(1)}%`);
-        });
-        
-        // Remove loading indicator and show results
+        if (!data || !data.labels) throw new Error('No labels data received');
         resultsDiv.removeChild(loadingBox);
         const box = document.createElement('div');
         box.className = 'result-box';
@@ -98,9 +100,6 @@ document.addEventListener('DOMContentLoaded', function() {
           </ul>`;
         resultsDiv.appendChild(box);
       } catch (err) {
-        console.error('Error processing image:', file.name, err);
-        
-        // Create a more informative error message
         const errorBox = document.createElement('div');
         errorBox.className = 'result-box error';
         errorBox.innerHTML = `
@@ -112,4 +111,4 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     }
   });
-});
+}

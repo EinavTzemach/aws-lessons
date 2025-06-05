@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ניתוח תמונה עם Rekognition</title>
+  <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script>
   <style>
     :root {
       --primary-dark: #0a1929;
@@ -219,12 +220,29 @@
         grid-template-columns: 1fr;
       }
     }
+    #logoutButton {
+      background: #dc3545;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+    }
+    #logoutButton:hover {
+      background: #c82333;
+    }
   </style>
 </head>
 <body>
+  <button id="logoutButton" style="display:none">Logout</button>
   <div class="container">
     <h1>זיהוי אובייקטים בתמונה עם Rekognition</h1>
-
     <div class="upload-section">
       <h1>הכנס מזהה לקוח ובחר תמונות</h1>
       <form id="uploadForm">
@@ -240,11 +258,38 @@
         <button type="submit">העלה ונתח</button>
       </form>
     </div>
-
     <div id="results"></div>
   </div>
-
   <script src="app.js"></script>
+  <script>
+    // Cognito configuration
+    const poolData = {
+      UserPoolId: 'REPLACE_WITH_USER_POOL_ID',
+      ClientId: 'REPLACE_WITH_CLIENT_ID'
+    };
+    const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+    // Check authentication on page load
+    window.onload = function() {
+      const cognitoUser = userPool.getCurrentUser();
+      if (!cognitoUser) {
+        window.location.href = 'login.html';
+        return;
+      }
+      cognitoUser.getSession(function(err, session) {
+        if (err || !session.isValid()) {
+          window.location.href = 'login.html';
+          return;
+        }
+        // Show logout button
+        document.getElementById('logoutButton').style.display = 'block';
+        document.getElementById('logoutButton').onclick = function() {
+          cognitoUser.signOut();
+          localStorage.removeItem('idToken');
+          window.location.href = 'login.html';
+        };
+      });
+    };
+  </script>
   <div class="container" align="center">All rights reserved 2025, Uri Berman AWS Course</div>
 </body>
 </html>

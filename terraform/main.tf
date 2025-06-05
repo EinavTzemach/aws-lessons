@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy resources"
   type        = string
-  default     = "us-east-1"
+  default     = "us-east-2"
 }
 
 
@@ -190,6 +190,8 @@ resource "aws_apigatewayv2_route" "upload_route" {
   api_id    = aws_apigatewayv2_api.api.id
   route_key = "POST /analyze"
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+  authorization_type = "JWT"
+  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -214,4 +216,12 @@ output "api_url" {
 
 output "frontend_url" {
   value = "http://${aws_s3_bucket.photos.bucket}.s3-website-${var.aws_region}.amazonaws.com"
+}
+
+output "cognito_user_pool_id" {
+  value = aws_cognito_user_pool.main.id
+}
+
+output "cognito_client_id" {
+  value = aws_cognito_user_pool_client.client.id
 }

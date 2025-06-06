@@ -72,6 +72,7 @@
                 <input type="password" id="password" required>
             </div>
             <button onclick="login()">Login</button>
+            <button type="button" id="showConfirmBtn" style="display:none;margin-top:10px;" onclick="showVerifyFormFromLogin()">Confirm Account</button>
             <div id="message"></div>
         </div>
         <div id="signupForm" style="display: none;">
@@ -85,6 +86,18 @@
             </div>
             <button onclick="signup()">Sign Up</button>
             <div id="signupMessage"></div>
+        </div>
+        <div id="verifyForm" style="display: none;">
+            <div class="form-group">
+                <label for="verifyEmail">Email:</label>
+                <input type="email" id="verifyEmail" required>
+            </div>
+            <div class="form-group">
+                <label for="verifyCode">Verification Code:</label>
+                <input type="text" id="verifyCode" required>
+            </div>
+            <button onclick="verify()">Verify</button>
+            <div id="verifyMessage"></div>
         </div>
         <p style="text-align: center; margin-top: 1rem;">
             <a href="#" onclick="toggleForms()">Need to create an account?</a>
@@ -102,12 +115,15 @@
         function toggleForms() {
             const loginForm = document.getElementById('loginForm');
             const signupForm = document.getElementById('signupForm');
+            const verifyForm = document.getElementById('verifyForm');
             if (loginForm.style.display === 'none') {
                 loginForm.style.display = 'block';
                 signupForm.style.display = 'none';
+                verifyForm.style.display = 'none';
             } else {
                 loginForm.style.display = 'none';
                 signupForm.style.display = 'block';
+                verifyForm.style.display = 'none';
             }
         }
 
@@ -137,8 +153,23 @@
                 },
                 onFailure: function(err) {
                     document.getElementById('message').innerHTML = `<div class="error">${err.message}</div>`;
+                    // If user is not confirmed, show the confirm button
+                    if (err.code === 'UserNotConfirmedException') {
+                        document.getElementById('showConfirmBtn').style.display = 'block';
+                    } else {
+                        document.getElementById('showConfirmBtn').style.display = 'none';
+                    }
                 }
             });
+        }
+
+        function showVerifyFormFromLogin() {
+            // Prefill the email in the verify form
+            document.getElementById('verifyEmail').value = document.getElementById('username').value;
+            document.getElementById('verifyForm').style.display = 'block';
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('signupForm').style.display = 'none';
+            document.getElementById('showConfirmBtn').style.display = 'none';
         }
 
         function signup() {
@@ -158,7 +189,35 @@
                     return;
                 }
                 document.getElementById('signupMessage').innerHTML = '<div class="success">Please check your email for verification code</div>';
-                toggleForms();
+                // Show verification form
+                document.getElementById('verifyForm').style.display = 'block';
+                document.getElementById('verifyEmail').value = email;
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('signupForm').style.display = 'none';
+            });
+        }
+
+        function verify() {
+            const email = document.getElementById('verifyEmail').value;
+            const code = document.getElementById('verifyCode').value;
+
+            const userData = {
+                Username: email,
+                Pool: userPool
+            };
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+            cognitoUser.confirmRegistration(code, true, function(err, result) {
+                if (err) {
+                    document.getElementById('verifyMessage').innerHTML = `<div class="error">${err.message}</div>`;
+                    return;
+                }
+                document.getElementById('verifyMessage').innerHTML = '<div class="success">Account verified! You can now log in.</div>';
+                setTimeout(() => {
+                    toggleForms(); // Show login form
+                    document.getElementById('verifyForm').style.display = 'none';
+                }, 2000);
             });
         }
 

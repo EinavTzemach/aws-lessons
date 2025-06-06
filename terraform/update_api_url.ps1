@@ -46,16 +46,22 @@ aws s3 cp ..\frontend\login.html "s3://$BUCKET_NAME/login.html" --content-type t
 
 Write-Host "Files uploaded successfully."
 
-# Invalidate CloudFront cache
-$CLOUDFRONT_URL = terraform output -raw cloudfront_url
-if ($CLOUDFRONT_URL -match "https://([^.]+)\.") {
-    $DISTRIBUTION_ID = $matches[1]
-    Write-Host "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
-    try {
-        aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"
-    } catch {
-        Write-Host "CloudFront invalidation failed, but continuing."
+# Check if CloudFront distribution exists in Terraform state
+$distributionUrl = terraform output -raw cloudfront_url 2>$null
+$distributionId = $distributionUrl -replace "https://([^.]+)\..*", '$1'
+
+$stateList = terraform state list 2>$null
+if ($stateList -like "*aws_cloudfront_distribution.frontend*") {
+    if ($distributionId) {
+        Write-Host "Creating CloudFront invalidation for distribution: $distributionId"
+        try {
+            aws cloudfront create-invalidation --distribution-id $distributionId --paths "/*"
+        } catch {
+            Write-Host "CloudFront invalidation failed, but continuing."
+        }
+    } else {
+        Write-Host "Could not determine CloudFront distribution ID from output, skipping invalidation."
     }
 } else {
-    Write-Host "Could not determine CloudFront distribution ID, skipping invalidation."
+    Write-Host "CloudFront distribution not found in Terraform state, skipping invalidation."
 }

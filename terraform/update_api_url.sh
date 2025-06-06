@@ -43,12 +43,15 @@ aws s3 cp ../frontend/login.html s3://$BUCKET_NAME/login.html --content-type tex
 
 echo "הקבצים הועלו בהצלחה."
 
-# Invalidate CloudFront cache
-distribution_url=$(terraform output -raw cloudfront_url)
-DISTRIBUTION_ID=$(echo "$distribution_url" | sed -E 's|https://([^.]+)\..*|\1|')
-if [ -n "$DISTRIBUTION_ID" ]; then
-  echo "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
-  aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*" || echo "CloudFront invalidation failed, but continuing."
+# Check if CloudFront distribution exists in Terraform state
+DISTRIBUTION_ID=$(terraform output -raw cloudfront_url 2>/dev/null | sed -E 's|https://([^.]+)\..*|\1|')
+if terraform state list 2>/dev/null | grep -q "aws_cloudfront_distribution.frontend"; then
+  if [ -n "$DISTRIBUTION_ID" ]; then
+    echo "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
+    aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*" || echo "CloudFront invalidation failed, but continuing."
+  else
+    echo "Could not determine CloudFront distribution ID from output, skipping invalidation."
+  fi
 else
-  echo "Could not determine CloudFront distribution ID, skipping invalidation."
+  echo "CloudFront distribution not found in Terraform state, skipping invalidation."
 fi

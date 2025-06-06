@@ -45,17 +45,19 @@ aws s3 cp ..\frontend\login.html s3://%BUCKET_NAME%/login.html --content-type te
 
 echo Files uploaded successfully.
 
-REM Invalidate CloudFront cache
-for /f "delims=" %%G in ('terraform output -raw cloudfront_url') do set CLOUDFRONT_URL=%%G
-for /f "tokens=2 delims=/" %%H in ("%CLOUDFRONT_URL%") do set DIST_PART=%%H
-for /f "delims=." %%I in ("%DIST_PART%") do set DISTRIBUTION_ID=%%I
+REM Check if CloudFront distribution exists in Terraform state
+for /f "usebackq tokens=*" %%i in (`terraform output -raw cloudfront_url 2^>nul`) do set distributionUrl=%%i
+set distributionId=%distributionUrl:https://=%
+for /f "tokens=1 delims=." %%i in ("%distributionId%") do set distributionId=%%i
 
-if not "%DISTRIBUTION_ID%"=="" (
-    echo Creating CloudFront invalidation for distribution: %DISTRIBUTION_ID%
-    aws cloudfront create-invalidation --distribution-id %DISTRIBUTION_ID% --paths "/*"
-    if errorlevel 1 (
-        echo CloudFront invalidation failed, but continuing.
+terraform state list 2>nul | findstr "aws_cloudfront_distribution.frontend" >nul
+if %%ERRORLEVEL%% equ 0 (
+    if not "%distributionId%" == "" (
+        echo Creating CloudFront invalidation for distribution: %distributionId%
+        aws cloudfront create-invalidation --distribution-id %distributionId% --paths "/*" || echo CloudFront invalidation failed, but continuing.
+    ) else (
+        echo Could not determine CloudFront distribution ID from output, skipping invalidation.
     )
 ) else (
-    echo Could not determine CloudFront distribution ID, skipping invalidation.
+    echo CloudFront distribution not found in Terraform state, skipping invalidation.
 )

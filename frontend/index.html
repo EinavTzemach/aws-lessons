@@ -241,6 +241,7 @@
 </head>
 <body>
   <button id="logoutButton" style="display:none">Logout</button>
+  <span id="userEmail" style="display:none; margin-right: 10px; color: #fff; font-weight: bold;"></span>
   <div class="container">
     <h1>זיהוי אובייקטים בתמונה עם Rekognition</h1>
     <div class="upload-section">
@@ -280,8 +281,17 @@
           window.location.href = 'login.html';
           return;
         }
-        // Show logout button
+        // Show logout button and user email
         document.getElementById('logoutButton').style.display = 'block';
+        cognitoUser.getUserAttributes(function(err, attributes) {
+          if (!err && attributes) {
+            const emailAttr = attributes.find(attr => attr.getName() === 'email');
+            if (emailAttr) {
+              document.getElementById('userEmail').textContent = emailAttr.getValue();
+              document.getElementById('userEmail').style.display = 'inline';
+            }
+          }
+        });
         document.getElementById('logoutButton').onclick = function() {
           cognitoUser.signOut();
           localStorage.removeItem('idToken');

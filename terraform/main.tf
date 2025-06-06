@@ -11,8 +11,14 @@ provider "aws" {
 }
 
 # S3 bucket for image storage and frontend hosting
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 resource "aws_s3_bucket" "photos" {
-  bucket         = "s3-clientphotos-aws-course"
+  bucket         = "s3-clientphotos-aws-course-${random_string.bucket_suffix.result}"
   force_destroy  = true  # ensures objects are deleted during destroy
   tags = {
     Name = "Client Photos"
@@ -36,18 +42,26 @@ resource "aws_s3_bucket_public_access_block" "no_block" {
   restrict_public_buckets = false
 }
 
-resource "aws_s3_bucket_policy" "allow_public" {
+resource "aws_s3_bucket_policy" "cloudfront_access" {
   bucket = aws_s3_bucket.photos.id
 
   policy = jsonencode({
     Version = "2012-10-17",
-    Statement = [{
-      Sid       = "PublicReadGetObject",
-      Effect    = "Allow",
-      Principal = "*",
-      Action    = "s3:GetObject",
-      Resource  = "${aws_s3_bucket.photos.arn}/*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        },
+        Action = "s3:GetObject",
+        Resource = "${aws_s3_bucket.photos.arn}/*",
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${aws_cloudfront_distribution.frontend.id}"
+          }
+        }
+      }
+    ]
   })
 }
 
@@ -352,3 +366,10 @@ resource "aws_cloudfront_distribution" "frontend" {
 output "cloudfront_url" {
   value = "https://${aws_cloudfront_distribution.frontend.domain_name}"
 }
+
+output "bucket_name" {
+  value = aws_s3_bucket.photos.bucket
+}
+
+# Add data source for account id
+data "aws_caller_identity" "current" {}

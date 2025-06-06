@@ -45,3 +45,17 @@ aws s3 cp ..\frontend\app.js "s3://$BUCKET_NAME/app.js" --content-type applicati
 aws s3 cp ..\frontend\login.html "s3://$BUCKET_NAME/login.html" --content-type text/html
 
 Write-Host "Files uploaded successfully."
+
+# Invalidate CloudFront cache
+$CLOUDFRONT_URL = terraform output -raw cloudfront_url
+if ($CLOUDFRONT_URL -match "https://([^.]+)\.") {
+    $DISTRIBUTION_ID = $matches[1]
+    Write-Host "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
+    try {
+        aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"
+    } catch {
+        Write-Host "CloudFront invalidation failed, but continuing."
+    }
+} else {
+    Write-Host "Could not determine CloudFront distribution ID, skipping invalidation."
+}

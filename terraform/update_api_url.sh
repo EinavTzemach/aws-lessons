@@ -42,3 +42,13 @@ aws s3 cp ../frontend/app.js s3://$BUCKET_NAME/app.js --content-type application
 aws s3 cp ../frontend/login.html s3://$BUCKET_NAME/login.html --content-type text/html
 
 echo "הקבצים הועלו בהצלחה."
+
+# Invalidate CloudFront cache
+distribution_url=$(terraform output -raw cloudfront_url)
+DISTRIBUTION_ID=$(echo "$distribution_url" | sed -E 's|https://([^.]+)\..*|\1|')
+if [ -n "$DISTRIBUTION_ID" ]; then
+  echo "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
+  aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*" || echo "CloudFront invalidation failed, but continuing."
+else
+  echo "Could not determine CloudFront distribution ID, skipping invalidation."
+fi

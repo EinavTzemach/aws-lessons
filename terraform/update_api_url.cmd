@@ -44,3 +44,18 @@ aws s3 cp ..\frontend\app.js s3://%BUCKET_NAME%/app.js --content-type applicatio
 aws s3 cp ..\frontend\login.html s3://%BUCKET_NAME%/login.html --content-type text/html
 
 echo Files uploaded successfully.
+
+REM Invalidate CloudFront cache
+for /f "delims=" %%G in ('terraform output -raw cloudfront_url') do set CLOUDFRONT_URL=%%G
+for /f "tokens=2 delims=/" %%H in ("%CLOUDFRONT_URL%") do set DIST_PART=%%H
+for /f "delims=." %%I in ("%DIST_PART%") do set DISTRIBUTION_ID=%%I
+
+if not "%DISTRIBUTION_ID%"=="" (
+    echo Creating CloudFront invalidation for distribution: %DISTRIBUTION_ID%
+    aws cloudfront create-invalidation --distribution-id %DISTRIBUTION_ID% --paths "/*"
+    if errorlevel 1 (
+        echo CloudFront invalidation failed, but continuing.
+    )
+) else (
+    echo Could not determine CloudFront distribution ID, skipping invalidation.
+)

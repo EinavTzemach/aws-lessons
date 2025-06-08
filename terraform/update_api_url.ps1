@@ -1,7 +1,7 @@
 # Get values from Terraform output
-$API_URL = terraform output -raw api_url
-$USER_POOL_ID = terraform output -raw cognito_user_pool_id
-$CLIENT_ID = terraform output -raw cognito_client_id
+$API_URL = terraform -chdir=terraform output -raw api_url
+$USER_POOL_ID = terraform -chdir=terraform output -raw cognito_user_pool_id
+$CLIENT_ID = terraform -chdir=terraform output -raw cognito_client_id
 
 if (-not $API_URL -or -not $USER_POOL_ID -or -not $CLIENT_ID) {
     Write-Host "Missing one or more Terraform outputs (api_url, cognito_user_pool_id, cognito_client_id)"
@@ -31,7 +31,7 @@ $indexHtmlPath = "..\frontend\index.html"
 Write-Host "Updated app.js, login.html, and index.html"
 
 # Get bucket name from frontend_url output
-$FRONTEND_URL = terraform output -raw frontend_url
+$FRONTEND_URL = terraform -chdir=terraform output -raw frontend_url
 if ($FRONTEND_URL -match "http://(.*?)\.s3-website") {
     $BUCKET_NAME = $matches[1]
 } else {
@@ -46,22 +46,23 @@ aws s3 cp ..\frontend\login.html "s3://$BUCKET_NAME/login.html" --content-type t
 
 Write-Host "Files uploaded successfully."
 
-# Check if CloudFront distribution exists in Terraform state
-$distributionUrl = terraform output -raw cloudfront_url 2>$null
-$distributionId = $distributionUrl -replace "https://([^.]+)\..*", '$1'
+# Check if CloudFront distribution exists in Terraform state and get the actual Distribution ID
+$CLOUDFRONT_DOMAIN_FULL = terraform -chdir=terraform output -raw cloudfront_url 2>$null
+$CLOUDFRONT_DOMAIN = $CLOUDFRONT_DOMAIN_FULL -replace "https://", ""
 
-$stateList = terraform state list 2>$null
-if ($stateList -like "*aws_cloudfront_distribution.frontend*") {
-    if ($distributionId) {
-        Write-Host "Creating CloudFront invalidation for distribution: $distributionId"
-        try {
-            aws cloudfront create-invalidation --distribution-id $distributionId --paths "/*"
-        } catch {
-            Write-Host "CloudFront invalidation failed, but continuing."
-        }
-    } else {
-        Write-Host "Could not determine CloudFront distribution ID from output, skipping invalidation."
+$DISTRIBUTION_ID = ""
+if ($CLOUDFRONT_DOMAIN) {
+    Write-Host "Attempting to get CloudFront Distribution ID using: aws cloudfront list-distributions --query \"DistributionList.Items[?DomainName=='$CLOUDFRONT_DOMAIN'].Id\" --output text"
+    $DISTRIBUTION_ID = (aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='$CLOUDFRONT_DOMAIN'].Id" --output text 2>$null)
+}
+
+if ($DISTRIBUTION_ID) {
+    Write-Host "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
+    try {
+        aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*" | Out-Null
+    } catch {
+        Write-Host "CloudFront invalidation failed, but continuing."
     }
 } else {
-    Write-Host "CloudFront distribution not found in Terraform state, skipping invalidation."
+    Write-Host "CloudFront distribution not found or ID could not be determined, skipping invalidation."
 }

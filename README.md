@@ -184,6 +184,7 @@ pytest
 - Rekognition supports faces, objects, and custom labels if needed.
 - **Cognito authentication and CloudFront HTTPS are now required for all users.**
 - If you see "User is not confirmed" on login, use the "Confirm Account" button to enter your verification code.
+- if you have unexcpected error send debug to me e.g. bash -x ./terraform/update_api_url.sh
 
 ---
 

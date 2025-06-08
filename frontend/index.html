@@ -229,19 +229,46 @@
       font-size: 1rem;
       font-weight: bold;
       cursor: pointer;
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      z-index: 1000;
+      position: static;
+      top: auto;
+      left: auto;
+      z-index: auto;
     }
     #logoutButton:hover {
       background: #c82333;
     }
+
+    #userRibbon {
+      position: fixed;
+      top: 0;
+      left: 0;
+      background-color: rgba(10, 25, 41, 0.8);
+      padding: 10px 20px;
+      border-bottom-right-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      z-index: 1000;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    #userRibbon #userEmail {
+      color: var(--text-light);
+      font-weight: bold;
+      margin-right: 0;
+    }
+
+    #userRibbon #logoutButton {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
-  <button id="logoutButton" style="display:none">Logout</button>
-  <span id="userEmail" style="display:none; margin-right: 10px; color: #fff; font-weight: bold;"></span>
+  <div id="userRibbon" style="display:none;">
+    <span id="userEmail"></span>
+    <button id="logoutButton">Logout</button>
+  </div>
   <div class="container">
     <h1>זיהוי אובייקטים בתמונה עם Rekognition</h1>
     <div class="upload-section">
@@ -282,13 +309,12 @@
           return;
         }
         // Show logout button and user email
-        document.getElementById('logoutButton').style.display = 'block';
+        document.getElementById('userRibbon').style.display = 'flex';
         cognitoUser.getUserAttributes(function(err, attributes) {
           if (!err && attributes) {
             const emailAttr = attributes.find(attr => attr.getName() === 'email');
             if (emailAttr) {
               document.getElementById('userEmail').textContent = emailAttr.getValue();
-              document.getElementById('userEmail').style.display = 'inline';
             }
           }
         });

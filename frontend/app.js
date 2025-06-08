@@ -19,6 +19,22 @@ window.onload = function() {
         }
         // User is authenticated, continue loading the app
         initializeApp(session.getIdToken().getJwtToken());
+
+        // Show logout button and user email
+        document.getElementById('userRibbon').style.display = 'flex';
+        cognitoUser.getUserAttributes(function(err, attributes) {
+          if (!err && attributes) {
+            const emailAttr = attributes.find(attr => attr.getName() === 'email');
+            if (emailAttr) {
+              document.getElementById('userEmail').textContent = emailAttr.getValue();
+            }
+          }
+        });
+        document.getElementById('logoutButton').onclick = function() {
+          cognitoUser.signOut();
+          localStorage.removeItem('idToken');
+          window.location.href = 'login.html';
+        };
     });
 };
 
@@ -27,21 +43,6 @@ function initializeApp(idToken) {
   const clientIdInput = document.getElementById('clientId');
   const imageFilesInput = document.getElementById('imageFiles');
   const resultsDiv = document.getElementById('results');
-
-  // Add logout button if not present
-  if (!document.getElementById('logoutButton')) {
-    const logoutBtn = document.createElement('button');
-    logoutBtn.id = 'logoutButton';
-    logoutBtn.textContent = 'Logout';
-    logoutBtn.style = 'position:fixed;top:20px;left:20px;z-index:1000;';
-    logoutBtn.onclick = function() {
-      const cognitoUser = userPool.getCurrentUser();
-      if (cognitoUser) cognitoUser.signOut();
-      localStorage.removeItem('idToken');
-      window.location.href = 'login.html';
-    };
-    document.body.appendChild(logoutBtn);
-  }
 
   if (!uploadForm || !clientIdInput || !imageFilesInput || !resultsDiv) {
     console.error('One or more required elements not found in the DOM');

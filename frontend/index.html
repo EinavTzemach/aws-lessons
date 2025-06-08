@@ -289,43 +289,6 @@
     <div id="results"></div>
   </div>
   <script src="app.js"></script>
-  <script>
-    // Cognito configuration
-    const poolData = {
-      UserPoolId: 'REPLACE_WITH_USER_POOL_ID',
-      ClientId: 'REPLACE_WITH_CLIENT_ID'
-    };
-    const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
-    // Check authentication on page load
-    window.onload = function() {
-      const cognitoUser = userPool.getCurrentUser();
-      if (!cognitoUser) {
-        window.location.href = 'login.html';
-        return;
-      }
-      cognitoUser.getSession(function(err, session) {
-        if (err || !session.isValid()) {
-          window.location.href = 'login.html';
-          return;
-        }
-        // Show logout button and user email
-        document.getElementById('userRibbon').style.display = 'flex';
-        cognitoUser.getUserAttributes(function(err, attributes) {
-          if (!err && attributes) {
-            const emailAttr = attributes.find(attr => attr.getName() === 'email');
-            if (emailAttr) {
-              document.getElementById('userEmail').textContent = emailAttr.getValue();
-            }
-          }
-        });
-        document.getElementById('logoutButton').onclick = function() {
-          cognitoUser.signOut();
-          localStorage.removeItem('idToken');
-          window.location.href = 'login.html';
-        };
-      });
-    };
-  </script>
   <div class="container" align="center">All rights reserved 2025, Uri Berman AWS Course</div>
 </body>
 </html>

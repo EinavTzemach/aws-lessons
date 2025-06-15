@@ -1,83 +1,119 @@
-# Determine the directory where the script is located (i.e., the terraform directory)
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+<#
+.SYNOPSIS
+    Sync frontend placeholders with Terraform outputs,
+    upload to S3 and (optionally) invalidate CloudFront.
 
-# Assume the project root is one level up from the script directory
-$ProjectRoot = Split-Path -Parent $ScriptDir
+.EXAMPLE
+    PS> .\update_frontend.ps1 -Verbose -Debug
+#>
 
-# Define paths relative to the project root
-$TerraformPath = Join-Path $ProjectRoot "terraform"
-$FrontendPath = Join-Path $ProjectRoot "frontend"
+[CmdletBinding()]
+param ()
 
-# Get values from Terraform output
-$API_URL = terraform -chdir:$TerraformPath output -raw api_url
-$USER_POOL_ID = terraform -chdir:$TerraformPath output -raw cognito_user_pool_id
-$CLIENT_ID = terraform -chdir:$TerraformPath output -raw cognito_client_id
-$CLOUDFRONT_URL = terraform -chdir:$TerraformPath output -raw cloudfront_url
-$BUCKET_NAME = terraform -chdir:$TerraformPath output -raw bucket_name
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-if (-not $API_URL -or -not $USER_POOL_ID -or -not $CLIENT_ID -or -not $CLOUDFRONT_URL -or -not $BUCKET_NAME) {
-    Write-Host "Missing one or more Terraform outputs (api_url, cognito_user_pool_id, cognito_client_id, cloudfront_url, bucket_name)"
-    exit 1
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Discover directories  (identical logic to your Bash script)
+# ─────────────────────────────────────────────────────────────────────────────
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot  = Split-Path $ScriptDir -Parent
+$TerraformDir = Join-Path $ProjectRoot 'terraform'
+$FrontendDir  = Join-Path $ProjectRoot 'frontend'
+
+Write-Debug "ScriptDir    : $ScriptDir"
+Write-Debug "ProjectRoot  : $ProjectRoot"
+Write-Debug "TerraformDir : $TerraformDir"
+Write-Debug "FrontendDir  : $FrontendDir"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Read Terraform outputs
+# ─────────────────────────────────────────────────────────────────────────────
+function TFOut([string]$Name) {
+    & terraform -chdir=$TerraformDir output -raw $Name 2>$null
 }
 
-Write-Host "API_URL: $API_URL"
-Write-Host "USER_POOL_ID: $USER_POOL_ID"
-Write-Host "CLIENT_ID: $CLIENT_ID"
+$API_URL      = TFOut 'api_url'
+$USER_POOL_ID = TFOut 'cognito_user_pool_id'
+$CLIENT_ID    = TFOut 'cognito_client_id'
+$CLOUDFRONT_URL = TFOut 'cloudfront_url'
+$BUCKET_NAME  = TFOut 'bucket_name'
 
-# Extract domain name from the CloudFront URL
-$CLOUDFRONT_DOMAIN = $CLOUDFRONT_URL -replace "https://", ""
+if (-not ($API_URL -and $USER_POOL_ID -and $CLIENT_ID -and $CLOUDFRONT_URL -and $BUCKET_NAME)) {
+    throw 'Missing one or more Terraform outputs (api_url, cognito_user_pool_id, cognito_client_id, cloudfront_url, bucket_name).'
+}
 
+Write-Verbose "API_URL      = $API_URL"
+Write-Verbose "USER_POOL_ID = $USER_POOL_ID"
+Write-Verbose "CLIENT_ID    = $CLIENT_ID"
+Write-Verbose "BUCKET_NAME  = $BUCKET_NAME"
+
+# Extract CloudFront domain (remove protocol and any trailing slash)
+$CLOUDFRONT_DOMAIN = ($CLOUDFRONT_URL -replace '^https?://', '') -replace '/.*$',''
 if (-not $CLOUDFRONT_DOMAIN) {
-    Write-Host "Could not extract CloudFront domain from URL: $CLOUDFRONT_URL"
-    exit 1
+    throw "Could not extract CloudFront domain from URL: $CLOUDFRONT_URL"
+}
+Write-Debug "CloudFront domain = $CLOUDFRONT_DOMAIN"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Replace placeholders in app.js, login.html, index.html
+# ─────────────────────────────────────────────────────────────────────────────
+function Replace-InFile ($Path, [hashtable]$Map) {
+    Write-Verbose "Updating $(Split-Path $Path -Leaf)"
+    $Content = Get-Content $Path -Raw
+    foreach ($Key in $Map.Keys) {
+        $Content = $Content -replace $Key, $Map[$Key]
+    }
+    Set-Content $Path $Content -NoNewline
 }
 
-# Update app.js, login.html, and index.html
-$appJsPath = Join-Path $FrontendPath "app.js"
-$loginHtmlPath = Join-Path $FrontendPath "login.html"
-$indexHtmlPath = Join-Path $FrontendPath "index.html"
+$appJs   = Join-Path $FrontendDir 'app.js'
+$login   = Join-Path $FrontendDir 'login.html'
+$index   = Join-Path $FrontendDir 'index.html'
 
-(Get-Content $appJsPath) -replace "REPLACE_WITH_API_URL", $API_URL `
-    -replace "REPLACE_WITH_USER_POOL_ID", $USER_POOL_ID `
-    -replace "REPLACE_WITH_CLIENT_ID", $CLIENT_ID | Set-Content $appJsPath
+Replace-InFile $appJs @{
+    'REPLACE_WITH_API_URL'      = $API_URL
+    'REPLACE_WITH_USER_POOL_ID' = $USER_POOL_ID
+    'REPLACE_WITH_CLIENT_ID'    = $CLIENT_ID
+}
+Replace-InFile $login @{
+    'REPLACE_WITH_USER_POOL_ID' = $USER_POOL_ID
+    'REPLACE_WITH_CLIENT_ID'    = $CLIENT_ID
+}
+Replace-InFile $index @{
+    'REPLACE_WITH_API_URL'      = $API_URL
+    'REPLACE_WITH_USER_POOL_ID' = $USER_POOL_ID
+    'REPLACE_WITH_CLIENT_ID'    = $CLIENT_ID
+}
+Write-Host '✔ Frontend files updated.'
 
-(Get-Content $loginHtmlPath) -replace "REPLACE_WITH_USER_POOL_ID", $USER_POOL_ID `
-    -replace "REPLACE_WITH_CLIENT_ID", $CLIENT_ID | Set-Content $loginHtmlPath
-
-(Get-Content $indexHtmlPath) -replace "REPLACE_WITH_API_URL", $API_URL `
-    -replace "REPLACE_WITH_USER_POOL_ID", $USER_POOL_ID `
-    -replace "REPLACE_WITH_CLIENT_ID", $CLIENT_ID | Set-Content $indexHtmlPath
-
-Write-Host "Updated app.js, login.html, and index.html"
-
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Upload to S3
+# ─────────────────────────────────────────────────────────────────────────────
 Write-Host "Uploading files to bucket: $BUCKET_NAME"
-aws s3 cp (Join-Path $FrontendPath "index.html") "s3://$BUCKET_NAME/index.html" --content-type text/html
-aws s3 cp (Join-Path $FrontendPath "app.js") "s3://$BUCKET_NAME/app.js" --content-type application/javascript
-aws s3 cp (Join-Path $FrontendPath "login.html") "s3://$BUCKET_NAME/login.html" --content-type text/html
+aws s3 cp $index "s3://$BUCKET_NAME/index.html" --content-type text/html
+aws s3 cp $appJs "s3://$BUCKET_NAME/app.js"     --content-type application/javascript
+aws s3 cp $login "s3://$BUCKET_NAME/login.html" --content-type text/html
+Write-Host '✔ Files uploaded.'
 
-Write-Host "Files uploaded successfully."
-
-# Check if CloudFront distribution exists in Terraform state
-$CloudFrontResourceExists = terraform -chdir:$TerraformPath state list aws_cloudfront_distribution.frontend 2>$null
-
-if ($CloudFrontResourceExists) {
-    # Get CloudFront URL and then Distribution ID
-    $DISTRIBUTION_ID = ""
-    if ($CLOUDFRONT_DOMAIN) {
-        Write-Host "Attempting to get CloudFront Distribution ID using: aws cloudfront list-distributions --query \"DistributionList.Items[?DomainName=='$CLOUDFRONT_DOMAIN'].Id\" --output text"
-        $DISTRIBUTION_ID = (aws cloudfront list-distributions -query "DistributionList.Items[?DomainName=='$CLOUDFRONT_DOMAIN'].Id" -output text 2>$null)
-    }
-
-    if ($DISTRIBUTION_ID) {
-        Write-Host "Creating CloudFront invalidation for distribution: $DISTRIBUTION_ID"
-        try {
-            aws cloudfront create-invalidation -distribution-id $DISTRIBUTION_ID -paths "/*" | Out-Null
-        } catch {
-            Write-Host "CloudFront invalidation failed, but continuing."
-        }
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. CloudFront invalidation (only if resource exists in state)
+# ─────────────────────────────────────────────────────────────────────────────
+$cfState = & terraform -chdir=$TerraformDir state list aws_cloudfront_distribution.frontend 2>$null
+if ($cfState) {
+    $DistId = aws cloudfront list-distributions `
+        --query "DistributionList.Items[?DomainName=='$CLOUDFRONT_DOMAIN'].Id" `
+        --output text 2>$null
+    if ($DistId) {
+        Write-Host "Creating CloudFront invalidation for distribution: $DistId"
+        aws cloudfront create-invalidation --distribution-id $DistId --paths '/*' | Write-Debug
+        Write-Host '✔ CloudFront cache invalidated.'
     } else {
-        Write-Host "CloudFront distribution ID could not be determined, skipping invalidation."
+        Write-Warning 'CloudFront distribution ID could not be determined, skipping invalidation.'
     }
 } else {
-    Write-Host "CloudFront distribution 'aws_cloudfront_distribution.frontend' not found in Terraform state, skipping invalidation."
+    Write-Verbose 'aws_cloudfront_distribution.frontend not found in Terraform state – skipping invalidation.'
 }
+
+Write-Host ''
+Write-Host '🎉  Static site is now synced with latest Terraform outputs.' -ForegroundColor Green

@@ -1,84 +1,97 @@
 @echo off
-REM Determine the directory where the script is located (i.e., the terraform directory)
-set "SCRIPT_DIR=%~dp0"
+REM ──────────────────────────────────────────────────────────────────────────────
+REM  update_frontend.cmd  –  Sync placeholders, upload to S3, invalidate CF
+REM  • Requires Terraform & AWS-CLI in PATH
+REM  • Works whether you launch it from project root, terraform folder, VS Code, etc.
+REM ──────────────────────────────────────────────────────────────────────────────
+setlocal EnableDelayedExpansion
+set ERRLEV=0
 
-REM Assume the project root is one level up from the script directory
-for %%i in ("%SCRIPT_DIR%") do set "PROJECT_ROOT=%%~dpi"
+REM ── 1. Discover directories (same logic as Bash) ─────────────────────────────
+set "SCRIPT_DIR=%~dp0"                           REM always ends with '\'
+for %%i in ("%SCRIPT_DIR%\..") do set "PROJECT_ROOT=%%~fi"
 
-REM Define paths relative to the project root
-set "TERRAFORM_PATH=%PROJECT_ROOT%terraform"
-set "FRONTEND_PATH=%PROJECT_ROOT%frontend"
+set "TERRAFORM_PATH=%PROJECT_ROOT%\terraform"
+set "FRONTEND_PATH=%PROJECT_ROOT%\frontend"
 
-REM Get values from Terraform output
-for /f "delims=" %%A in ('terraform -chdir="%TERRAFORM_PATH%" output -raw api_url') do set API_URL=%%A
-for /f "delims=" %%B in ('terraform -chdir="%TERRAFORM_PATH%" output -raw cognito_user_pool_id') do set USER_POOL_ID=%%B
-for /f "delims=" %%C in ('terraform -chdir="%TERRAFORM_PATH%" output -raw cognito_client_id') do set CLIENT_ID=%%C
-for /f "delims=" %%G in ('terraform -chdir="%TERRAFORM_PATH%" output -raw cloudfront_url') do set CLOUDFRONT_URL=%%G
-for /f "delims=" %%H in ('terraform -chdir="%TERRAFORM_PATH%" output -raw bucket_name') do set BUCKET_NAME=%%H
+REM ── 2. Helper : function to read Terraform outputs ---------------------------
+for %%# in (api_url cognito_user_pool_id cognito_client_id cloudfront_url bucket_name) do call :GET_TF %%#
 
-if "%API_URL%"=="" (
-    echo Could not find API Gateway URL from Terraform
-    exit /b 1
-)
-if "%USER_POOL_ID%"=="" (
-    echo Could not find Cognito User Pool ID from Terraform
-    exit /b 1
-)
-if "%CLIENT_ID%"=="" (
-    echo Could not find Cognito Client ID from Terraform
-    exit /b 1
-)
-if "%CLOUDFRONT_URL%"=="" (
-    echo Could not find CloudFront URL from Terraform
-    exit /b 1
-)
-if "%BUCKET_NAME%"=="" (
-    echo Could not find bucket name from Terraform
-    exit /b 1
-)
+if not defined api_url            (echo [ERROR] api_url missing        & set ERRLEV=1)
+if not defined cognito_user_pool_id (echo [ERROR] user pool id missing  & set ERRLEV=1)
+if not defined cognito_client_id   (echo [ERROR] client id missing      & set ERRLEV=1)
+if not defined cloudfront_url      (echo [ERROR] cloudfront url missing & set ERRLEV=1)
+if not defined bucket_name         (echo [ERROR] bucket name missing    & set ERRLEV=1)
+if %ERRLEV% NEQ 0 exit /b 1
 
-echo API_URL: %API_URL%
-echo USER_POOL_ID: %USER_POOL_ID%
-echo CLIENT_ID: %CLIENT_ID%
+echo API_URL      = %api_url%
+echo USER_POOL_ID = %cognito_user_pool_id%
+echo CLIENT_ID    = %cognito_client_id%
+echo BUCKET_NAME  = %bucket_name%
 
-REM Extract domain name from the CloudFront URL
-set "CLOUDFRONT_DOMAIN=%CLOUDFRONT_URL:https://=%"
-if "%CLOUDFRONT_DOMAIN%"=="%CLOUDFRONT_URL%" (
-    echo Could not extract CloudFront domain from URL: %CLOUDFRONT_URL%
+REM ── 3. Extract CloudFront domain (strip protocol + path) ----------------------
+set "TMP=%cloudfront_url:https://=%"
+for /f "tokens=1 delims=/" %%d in ("%TMP%") do set "CLOUDFRONT_DOMAIN=%%d"
+if not defined CLOUDFRONT_DOMAIN (
+    echo [ERROR] Could not parse CloudFront domain from %cloudfront_url%
     exit /b 1
 )
 
-REM Update app.js, login.html, and index.html using PowerShell
-powershell -Command "^(Get-Content '%FRONTEND_PATH%app.js') -replace 'REPLACE_WITH_API_URL', '%API_URL%' -replace 'REPLACE_WITH_USER_POOL_ID', '%USER_POOL_ID%' -replace 'REPLACE_WITH_CLIENT_ID', '%CLIENT_ID%' ^| Set-Content '%FRONTEND_PATH%app.js'"
-powershell -Command "^(Get-Content '%FRONTEND_PATH%login.html') -replace 'REPLACE_WITH_USER_POOL_ID', '%USER_POOL_ID%' -replace 'REPLACE_WITH_CLIENT_ID', '%CLIENT_ID%' ^| Set-Content '%FRONTEND_PATH%login.html'"
-powershell -Command "^(Get-Content '%FRONTEND_PATH%index.html') -replace 'REPLACE_WITH_API_URL', '%API_URL%' -replace 'REPLACE_WITH_USER_POOL_ID', '%USER_POOL_ID%' -replace 'REPLACE_WITH_CLIENT_ID', '%CLIENT_ID%' ^| Set-Content '%FRONTEND_PATH%index.html'"
+REM ── 4. Replace placeholders in frontend files (PowerShell one-liner) ----------
+echo Updating placeholders …
+call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_API_URL      "%api_url%"
+call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_USER_POOL_ID "%cognito_user_pool_id%"
+call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_CLIENT_ID    "%cognito_client_id%"
 
-echo Updated app.js, login.html, and index.html
+call :PS_REPLACE "%FRONTEND_PATH%\login.html" REPLACE_WITH_USER_POOL_ID "%cognito_user_pool_id%"
+call :PS_REPLACE "%FRONTEND_PATH%\login.html" REPLACE_WITH_CLIENT_ID    "%cognito_client_id%"
 
-echo Uploading files to bucket: %BUCKET_NAME%
-aws s3 cp "%FRONTEND_PATH%index.html" "s3://%BUCKET_NAME%/index.html" --content-type text/html
-aws s3 cp "%FRONTEND_PATH%app.js" "s3://%BUCKET_NAME%/app.js" --content-type application/javascript
-aws s3 cp "%FRONTEND_PATH%login.html" "s3://%BUCKET_NAME%/login.html" --content-type text/html
+call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_API_URL      "%api_url%"
+call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_USER_POOL_ID "%cognito_user_pool_id%"
+call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_CLIENT_ID    "%cognito_client_id%"
 
-echo Files uploaded successfully.
+echo ✓ Frontend files updated
 
-REM Check if CloudFront distribution exists in Terraform state before attempting invalidation
-for /f "usebackq tokens=*" %%K in ('terraform -chdir="%TERRAFORM_PATH%" state list aws_cloudfront_distribution.frontend 2^>nul') do set CLOUDFRONT_RESOURCE_EXISTS=%%K
+REM ── 5. Upload to S3 -----------------------------------------------------------
+echo Uploading files to bucket %bucket_name% …
+aws s3 cp "%FRONTEND_PATH%\index.html" "s3://%bucket_name%/index.html" --content-type text/html
+aws s3 cp "%FRONTEND_PATH%\app.js"     "s3://%bucket_name%/app.js"     --content-type application/javascript
+aws s3 cp "%FRONTEND_PATH%\login.html" "s3://%bucket_name%/login.html" --content-type text/html
+echo ✓ Files uploaded
 
-if not "%CLOUDFRONT_RESOURCE_EXISTS%" == "" (
-    REM Get CloudFront URL and then Distribution ID
-    set "DISTRIBUTION_ID="
-    if not "%CLOUDFRONT_DOMAIN%" == "" (
-        echo Attempting to get CloudFront Distribution ID using: aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='%CLOUDFRONT_DOMAIN%'].Id" --output text
-        for /f "usebackq tokens=*" %%j in (`aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='%CLOUDFRONT_DOMAIN%'].Id" --output text 2^>nul`) do set DISTRIBUTION_ID=%%j
-    )
+REM ── 6. CloudFront invalidation (only if resource exists in state) ------------
+for /f "usebackq tokens=*" %%k in (`terraform -chdir="%TERRAFORM_PATH%" ^
+        state list aws_cloudfront_distribution.frontend 2^>nul`) do set "CF_STATE=%%k"
 
-    if not "%DISTRIBUTION_ID%" == "" (
-        echo Creating CloudFront invalidation for distribution: %DISTRIBUTION_ID%
-        aws cloudfront create-invalidation --distribution-id %DISTRIBUTION_ID% --paths "/*" >nul || echo CloudFront invalidation failed, but continuing.
+if defined CF_STATE (
+    for /f "usebackq tokens=* delims=" %%j in (`
+        aws cloudfront list-distributions ^
+            --query "DistributionList.Items[?DomainName=='%CLOUDFRONT_DOMAIN%'].Id" ^
+            --output text 2^>nul`) do set "DIST_ID=%%j"
+    if defined DIST_ID (
+        echo Creating CloudFront invalidation for %DIST_ID% …
+        aws cloudfront create-invalidation --distribution-id %DIST_ID% --paths "/*" >nul
+        echo ✓ CloudFront cache invalidated
     ) else (
-        echo CloudFront distribution ID could not be determined, skipping invalidation.
+        echo [WARN] Distribution ID could not be determined – skipping invalidation
     )
 ) else (
-    echo CloudFront distribution 'aws_cloudfront_distribution.frontend' not found in Terraform state, skipping invalidation.
+    echo CloudFront distribution not found in Terraform state – skipping invalidation
 )
+
+echo Done.
+exit /b 0
+
+REM ──────────────────────────────────────────────────────────────────────────────
+REM  Sub-routines
+REM ──────────────────────────────────────────────────────────────────────────────
+:GET_TF
+REM   %1 = output name   (sets variable of same name)
+for /f "usebackq delims=" %%o in (`terraform -chdir="%TERRAFORM_PATH%" output -raw %1 2^>nul`) do set "%1=%%o"
+goto :eof
+
+:PS_REPLACE
+REM   %1 = file   %2 = placeholder   %3 = replacement value
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -Command "(Get-Content -Path '%~1') -replace '%~2', %3 | Set-Content -Path '%~1'"
+goto :eof

@@ -1,7 +1,7 @@
 // Cognito configuration
 const poolData = {
-    UserPoolId: 'REPLACE_WITH_USER_POOL_ID',
-    ClientId: 'REPLACE_WITH_CLIENT_ID'
+    UserPoolId: 'us-east-2_O99mzImrz',
+    ClientId: '34f7lhcodsfddfd7k1dkkuq1ab'
 };
 const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
 
@@ -71,7 +71,7 @@ function initializeApp(idToken) {
         loadingBox.className = 'result-box';
         loadingBox.innerHTML = `<h3>${file.name}</h3><p>מעבד תמונה...</p>`;
         resultsDiv.appendChild(loadingBox);
-        const res = await fetch('REPLACE_WITH_API_URL/analyze', {
+        const res = await fetch('"https://q6e9s37x33.execute-api.us-east-2.amazonaws.com"/analyze', {
           method: 'POST',
           body: formData,
           headers: {

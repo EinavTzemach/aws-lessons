@@ -71,7 +71,7 @@ function initializeApp(idToken) {
         loadingBox.className = 'result-box';
         loadingBox.innerHTML = `<h3>${file.name}</h3><p>מעבד תמונה...</p>`;
         resultsDiv.appendChild(loadingBox);
-        const res = await fetch('"https://q6e9s37x33.execute-api.us-east-2.amazonaws.com"/analyze', {
+        const res = await fetch('https://q6e9s37x33.execute-api.us-east-2.amazonaws.com/analyze', {
           method: 'POST',
           body: formData,
           headers: {
